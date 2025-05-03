@@ -1,0 +1,180 @@
+using UnityEngine;
+using System.Collections;
+
+public class PlayerMovement : MonoBehaviour
+{
+    [SerializeField] private float moveSpeed = 5f; // Movement speed
+    [SerializeField] private float jumpForce = 5f; // Jump force
+    [SerializeField] private float dashSpeed = 15f; // Horizontal dash speed
+    [SerializeField] private float dashDuration = 0.2f; // Duration of horizontal dash
+    [SerializeField] private float dashCooldown = 1f; // Cooldown between dashes
+    [SerializeField] private float holdThreshold = 0.2f; // Time to distinguish tap vs hold for Left Shift
+    [SerializeField] private Transform groundCheck; // Position to check for ground
+    [SerializeField] private float checkRadius = 0.2f; // Radius for ground check
+    [SerializeField] private float crouchSpeedMultiplier = 0.5f; // Speed reduction while crouching
+    [SerializeField] private float crouchHeightMultiplier = 0.5f; // Collider height reduction
+    [SerializeField] private Transform ceilingCheck; // Position to check for ceiling
+    [SerializeField] private FixedJoystick joystick; // Reference to the FixedJoystick
+
+    private Rigidbody2D rb; // Reference to Rigidbody2D component
+    private CapsuleCollider2D collider; // Reference to CapsuleCollider2D component
+    private float moveInput; // Horizontal input value
+    private bool isGrounded; // Check if player is on ground
+    private bool jumpInput; // Check for jump input
+    private bool shiftPressed; // Check if Left Shift is pressed
+    private bool isDashing; // Check if currently dashing
+    private bool canDash = true; // Check if dash is off cooldown
+    private float lastMoveDirection = 1f; // Last direction faced (for dash when no input)
+    private LayerMask groundLayer; // Layer for ground detection
+    private bool isCrouching; // Check if currently crouching
+    private Vector2 originalColliderSize; // Original collider size
+    private Vector2 originalColliderOffset; // Original collider offset
+    private Vector3 originalGroundCheckPos; // Original ground check position
+    private Vector3 originalLocalScale; // Original sprite scale
+    private float shiftPressTime; // Time when Left Shift was pressed
+    private bool dashTriggered; // Flag to prevent dash after crouch
+
+    void Start()
+    {
+        // Get components
+        rb = GetComponent<Rigidbody2D>();
+        collider = GetComponent<CapsuleCollider2D>();
+        // Hardcode the ground layer to "Ground"
+        groundLayer = LayerMask.GetMask("Ground");
+        // Store original values
+        originalColliderSize = collider.size;
+        originalColliderOffset = collider.offset;
+        originalGroundCheckPos = groundCheck.localPosition;
+        originalLocalScale = transform.localScale;
+    }
+
+    void Update()
+    {
+        // Get horizontal input from joystick
+        moveInput = joystick.Horizontal;
+
+        // Update last move direction when moving
+        if (moveInput != 0)
+        {
+            lastMoveDirection = moveInput;
+        }
+
+        // Check for jump input
+        jumpInput = Input.GetKeyDown(KeyCode.Space);
+
+        // Check for Left Shift input
+        bool shiftInput = Input.GetKey(KeyCode.LeftShift);
+        bool shiftDown = Input.GetKeyDown(KeyCode.LeftShift);
+        bool shiftUp = Input.GetKeyUp(KeyCode.LeftShift);
+
+        // Check if player is grounded
+        isGrounded = Physics2D.OverlapCircle(groundCheck.position, checkRadius, groundLayer);
+
+        // Handle Left Shift input (crouch or dash)
+        if (shiftDown && isGrounded && !isDashing)
+        {
+            shiftPressed = true;
+            shiftPressTime = Time.time;
+            dashTriggered = false;
+            // Debug.Log("Shift Pressed");
+        }
+
+        if (shiftPressed && shiftInput && isGrounded && !isDashing)
+        {
+            // Check if held long enough to crouch
+            if (Time.time - shiftPressTime >= holdThreshold && !isCrouching)
+            {
+                // Start crouching
+                isCrouching = true;
+                // Reduce collider height, keep offset at (0, 0)
+                collider.size = new Vector2(originalColliderSize.x, originalColliderSize.y * crouchHeightMultiplier);
+                collider.offset = new Vector2(originalColliderOffset.x, 0f);
+                // Scale sprite and adjust position to keep feet grounded
+                transform.localScale = new Vector3(originalLocalScale.x, originalLocalScale.y * crouchHeightMultiplier, originalLocalScale.z);
+                float positionOffsetY = -(originalColliderSize.y * (1f - crouchHeightMultiplier)) / 2f;
+                transform.position = new Vector3(transform.position.x, transform.position.y + positionOffsetY, transform.position.z);
+                // Keep ground check at feet
+                groundCheck.localPosition = originalGroundCheckPos;
+                // Debug.Log("Crouching: OffsetY=" + collider.offset.y + ", PositionOffsetY=" + positionOffsetY);
+            }
+        }
+
+        if (shiftUp && shiftPressed)
+        {
+            shiftPressed = false;
+            // Check for tap (dash)
+            if (Time.time - shiftPressTime < holdThreshold && !dashTriggered && canDash && isGrounded && !isCrouching)
+            {
+                StartCoroutine(Dash());
+                dashTriggered = true;
+                // Debug.Log("Dash Triggered");
+            }
+            // Stop crouching if active
+            if (isCrouching)
+            {
+                // Check for ceiling before uncrouching
+                bool ceilingHit = Physics2D.OverlapCircle(ceilingCheck.position, checkRadius, groundLayer);
+                if (!ceilingHit)
+                {
+                    // Stop crouching
+                    isCrouching = false;
+                    // Restore collider
+                    collider.size = originalColliderSize;
+                    collider.offset = originalColliderOffset;
+                    // Restore sprite scale and position
+                    transform.localScale = originalLocalScale;
+                    float positionOffsetY = (originalColliderSize.y * (1f - crouchHeightMultiplier)) / 2f;
+                    transform.position = new Vector3(transform.position.x, transform.position.y + positionOffsetY, transform.position.z);
+                    // Restore ground check position
+                    groundCheck.localPosition = originalGroundCheckPos;
+                    // Debug.Log("Uncrouching");
+                }
+            }
+        }
+
+        // Jump when space is pressed, grounded, and not crouching
+        if (jumpInput && isGrounded && !isCrouching)
+        {
+            rb.linearVelocity = new Vector2(rb.linearVelocity.x, jumpForce);
+        }
+    }
+
+    void FixedUpdate()
+    {
+        // Apply horizontal movement only if not dashing
+        if (!isDashing)
+        {
+            float currentSpeed = isCrouching ? moveSpeed * crouchSpeedMultiplier : moveSpeed;
+            rb.linearVelocity = new Vector2(moveInput * currentSpeed, rb.linearVelocity.y);
+        }
+    }
+
+    private IEnumerator Dash()
+    {
+        canDash = false;
+        isDashing = true;
+
+        // Get current horizontal input from joystick
+        float horizontalInput = joystick.Horizontal;
+
+        // Determine dash direction (use current input or last direction)
+        float dashDirectionX = horizontalInput != 0 ? horizontalInput : lastMoveDirection;
+
+        // Apply horizontal dash velocity
+        Vector2 dashVelocity = new Vector2(dashDirectionX * dashSpeed, 0f);
+        // Debug.Log("Horizontal Dash: DirectionX=" + dashDirectionX + ", Velocity=" + dashVelocity);
+        rb.linearVelocity = dashVelocity;
+
+        // Wait for dash duration
+        yield return new WaitForSeconds(dashDuration);
+
+        // End dash, restore normal movement
+        isDashing = false;
+        float currentSpeed = isCrouching ? moveSpeed * crouchSpeedMultiplier : moveSpeed;
+        rb.linearVelocity = new Vector2(joystick.Horizontal * currentSpeed, rb.linearVelocity.y);
+
+        // Wait for cooldown
+        yield return new WaitForSeconds(dashCooldown);
+        canDash = true;
+    }
+}

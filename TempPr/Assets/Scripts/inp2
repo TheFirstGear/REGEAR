@@ -1,0 +1,96 @@
+using UnityEngine;
+using UnityEngine.EventSystems;
+using UnityEngine.UI;
+
+public class InputManager : MonoBehaviour
+{
+    [SerializeField] private FixedJoystick joystick; // Reference to FixedJoystick
+    [SerializeField] private Button jumpButton; // Reference to jump button
+    [SerializeField] private Button dashCrouchButton; // Reference to dash/crouch button
+    [SerializeField] private float holdThreshold = 0.2f; // Time to distinguish tap vs hold
+
+    private bool isJumpPressed; // True for one frame when jump button is pressed
+    private bool isDashCrouchHeld; // True while dash/crouch button is held
+    private bool isDashCrouchPressed; // True for one frame on press
+    private bool isDashCrouchReleased; // True for one frame on release
+    private float dashCrouchPressTime; // Time when dash/crouch was pressed
+
+    public float Horizontal => joystick != null ? joystick.Horizontal : 0f;
+    public bool IsJumpPressed
+    {
+        get
+        {
+            bool value = isJumpPressed;
+            isJumpPressed = false; // Reset after reading
+            return value;
+        }
+    }
+    public bool IsDashCrouchPressed => isDashCrouchPressed;
+    public bool IsDashCrouchHeld => isDashCrouchHeld && (Time.time - dashCrouchPressTime >= holdThreshold);
+    public bool IsDashCrouchTapped => isDashCrouchReleased && (Time.time - dashCrouchPressTime < holdThreshold);
+
+    void Start()
+    {
+        SetupButtonListeners();
+    }
+
+    void SetupButtonListeners()
+    {
+        if (jumpButton != null)
+        {
+            jumpButton.onClick.RemoveAllListeners();
+            jumpButton.onClick.AddListener(() =>
+            {
+                isJumpPressed = true;
+                Debug.Log("Jump button pressed");
+            });
+        }
+        else
+        {
+            Debug.LogWarning("JumpButton not assigned in InputManager");
+        }
+
+        if (dashCrouchButton != null)
+        {
+            var trigger = dashCrouchButton.gameObject.GetComponent<EventTrigger>();
+            if (trigger == null)
+                trigger = dashCrouchButton.gameObject.AddComponent<EventTrigger>();
+
+            trigger.triggers.Clear();
+
+            var pointerDown = new EventTrigger.Entry { eventID = EventTriggerType.PointerDown };
+            pointerDown.callback.AddListener((data) => OnDashCrouchButtonDown());
+            trigger.triggers.Add(pointerDown);
+
+            var pointerUp = new EventTrigger.Entry { eventID = EventTriggerType.PointerUp };
+            pointerUp.callback.AddListener((data) => OnDashCrouchButtonUp());
+            trigger.triggers.Add(pointerUp);
+        }
+        else
+        {
+            Debug.LogWarning("DashCrouchButton not assigned in InputManager");
+        }
+    }
+
+    void OnDashCrouchButtonDown()
+    {
+        isDashCrouchHeld = true;
+        isDashCrouchPressed = true;
+        dashCrouchPressTime = Time.time;
+        Debug.Log("Dash/Crouch button pressed");
+    }
+
+    void OnDashCrouchButtonUp()
+    {
+        isDashCrouchHeld = false;
+        isDashCrouchReleased = true;
+        Debug.Log("Dash/Crouch button released, Tap: " + (Time.time - dashCrouchPressTime < holdThreshold));
+    }
+
+    void LateUpdate()
+    {
+        // Reset single-frame inputs after all scripts have read them
+        isDashCrouchPressed = false;
+        isDashCrouchReleased = false;
+    }
+}
